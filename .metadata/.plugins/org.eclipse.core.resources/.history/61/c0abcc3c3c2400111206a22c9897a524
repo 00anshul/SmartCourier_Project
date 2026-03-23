@@ -1,0 +1,36 @@
+spring.application.name=api-gateway
+spring.profiles.active=dev
+
+# Redis
+spring.data.redis.host=localhost
+spring.data.redis.port=6379
+
+# Gateway Routes — Auth
+spring.cloud.gateway.server.webflux.routes[0].id=auth-service
+spring.cloud.gateway.server.webflux.routes[0].uri=http://localhost:8081
+spring.cloud.gateway.server.webflux.routes[0].predicates[0]=Path=/gateway/auth/**
+spring.cloud.gateway.server.webflux.routes[0].filters[0]=StripPrefix=1
+
+# Gateway Routes — Delivery
+spring.cloud.gateway.server.webflux.routes[1].id=delivery-service
+spring.cloud.gateway.server.webflux.routes[1].uri=http://localhost:8082
+spring.cloud.gateway.server.webflux.routes[1].predicates[0]=Path=/gateway/deliveries/**
+spring.cloud.gateway.server.webflux.routes[1].filters[0]=StripPrefix=1
+
+# Gateway Routes — Tracking
+spring.cloud.gateway.server.webflux.routes[2].id=tracking-service
+spring.cloud.gateway.server.webflux.routes[2].uri=http://localhost:8083
+spring.cloud.gateway.server.webflux.routes[2].predicates[0]=Path=/gateway/tracking/**
+spring.cloud.gateway.server.webflux.routes[2].filters[0]=StripPrefix=1
+
+# Gateway Routes — Admin
+spring.cloud.gateway.server.webflux.routes[3].id=admin-service
+spring.cloud.gateway.server.webflux.routes[3].uri=http://localhost:8084
+spring.cloud.gateway.server.webflux.routes[3].predicates[0]=Path=/gateway/admin/**
+spring.cloud.gateway.server.webflux.routes[3].filters[0]=StripPrefix=1
+
+# Server
+server.port=8080
+
+# Actuator
+management.endpoints.web.exposure.include=health,info
