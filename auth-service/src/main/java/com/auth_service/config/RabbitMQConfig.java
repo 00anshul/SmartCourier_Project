@@ -1,0 +1,46 @@
+package com.auth_service.config;
+
+import org.springframework.amqp.core.*;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class RabbitMQConfig {
+
+    public static final String USER_REGISTERED_QUEUE    = "user.registered.queue";
+    public static final String USER_REGISTERED_EXCHANGE = "user.registered.exchange";
+    public static final String USER_REGISTERED_KEY      = "user.registered";
+
+    @Bean
+     Queue userRegisteredQueue() {
+        return new Queue(USER_REGISTERED_QUEUE, true);
+    }
+
+    @Bean
+     TopicExchange userRegisteredExchange() {
+        return new TopicExchange(USER_REGISTERED_EXCHANGE);
+    }
+
+    @Bean
+     Binding userRegisteredBinding() {
+        return BindingBuilder
+                .bind(userRegisteredQueue())
+                .to(userRegisteredExchange())
+                .with(USER_REGISTERED_KEY);
+    }
+
+    @Bean
+     JacksonJsonMessageConverter messageConverter() {
+        return new JacksonJsonMessageConverter();
+    }
+
+    @Bean
+     RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory) {
+        RabbitTemplate template = new RabbitTemplate(connectionFactory);
+        template.setMessageConverter(messageConverter());
+        return template;
+    }
+}
