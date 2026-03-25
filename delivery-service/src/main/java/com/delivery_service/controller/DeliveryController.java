@@ -23,6 +23,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 
 @RestController
 @RequestMapping("/deliveries")
+@CrossOrigin("*")
 @SecurityRequirement(name = "bearerAuth")
 public class DeliveryController {
 

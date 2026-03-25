@@ -23,6 +23,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/admin")
 @PreAuthorize("hasRole('ADMIN')")
+@CrossOrigin("*")
 @SecurityRequirement(name = "bearerAuth")
 public class AdminController {
 

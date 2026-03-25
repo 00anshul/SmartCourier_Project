@@ -7,4 +7,6 @@
     <fullyQualifiedTypeName name="jakarta.transaction.Transactional"/>
     <fullyQualifiedTypeName name="com.tracking_service.dto.ApiResponse"/>
     <fullyQualifiedTypeName name="com.admin_service.dto.ApiResponse"/>
+    <fullyQualifiedTypeName name="org.springframework.cloud.config.server.EnableConfigServer"/>
+    <fullyQualifiedTypeName name="org.springframework.cloud.openfeign.EnableFeignClients"/>
 </qualifiedTypeNameHistroy>

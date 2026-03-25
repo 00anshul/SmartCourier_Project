@@ -1,66 +1,46 @@
 package com.api_gateway.config;
 
-import io.jsonwebtoken.JwtException;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
-import org.springframework.beans.factory.annotation.Value;
+import com.api_gateway.filter.JwtAuthenticationFilter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
-
-import javax.crypto.SecretKey;
-import java.util.List;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.core.Ordered;
 
 @Configuration
-public class GatewayConfig implements WebMvcConfigurer {
+public class GatewayConfig {
 
-    @Value("${jwt.secret}")
-    private String secret;
+    @Autowired
+    private JwtAuthenticationFilter jwtAuthenticationFilter;
 
-    private static final List<String> PUBLIC_PATHS = List.of(
-        "/gateway/auth/register",
-        "/gateway/auth/login",
-        "/gateway/auth/refresh"
-    );
-
-    private SecretKey getSigningKey() {
-        byte[] keyBytes = hexStringToByteArray(secret);
-        return Keys.hmacShaKeyFor(keyBytes);
+    @Bean
+    FilterRegistrationBean<JwtAuthenticationFilter> jwtFilter() {
+        FilterRegistrationBean<JwtAuthenticationFilter> bean =
+                new FilterRegistrationBean<>();
+        bean.setFilter(jwtAuthenticationFilter);
+        bean.addUrlPatterns("/gateway/*");
+        bean.setOrder(Ordered.HIGHEST_PRECEDENCE);
+        return bean;
     }
 
-    private byte[] hexStringToByteArray(String hex) {
-        int len = hex.length();
-        byte[] data = new byte[len / 2];
-        for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
-                    + Character.digit(hex.charAt(i + 1), 16));
-        }
-        return data;
-    }
-
-    public boolean validateToken(String token) {
-        try {
-            Jwts.parser()
-                .verifyWith(getSigningKey())
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
-            return true;
-        } catch (JwtException | IllegalArgumentException e) {
-            return false;
-        }
-    }
-
-    public boolean isPublicPath(String path) {
-        return PUBLIC_PATHS.stream().anyMatch(path::startsWith);
-    }
-
-    @Override
-    public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/**")
-                .allowedOrigins("http://localhost:4200")
-                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-                .allowedHeaders("*")
-                .allowCredentials(true);
+    @Bean
+    WebMvcConfigurer corsConfigurer() {
+        return new WebMvcConfigurer() {
+            @Override
+            public void addCorsMappings(CorsRegistry registry) {
+                registry.addMapping("/**")
+                        .allowedOrigins(
+                                "http://localhost:4200",
+                                "http://localhost:3000"
+                        )
+                        .allowedMethods("GET", "POST", "PUT",
+                                "DELETE", "OPTIONS")
+                        .allowedHeaders("*")
+                        .allowCredentials(true)
+                        .maxAge(3600);
+            }
+        };
     }
 }

@@ -23,6 +23,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/tracking")
+@CrossOrigin("*")
 @SecurityRequirement(name = "bearerAuth")
 public class TrackingController {
 
