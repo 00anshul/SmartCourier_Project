@@ -1,0 +1,282 @@
+version: '3.8'
+
+services:
+  # 1. The Database
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: admin_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql # THE PERMANENT FIX
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d admin_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Eureka Server
+  eureka-server:
+    build: ./eureka-server
+    container_name: eureka-server
+    ports:
+      - "8761:8761"
+    environment:
+      - EUREKA_CLIENT_REGISTER_WITH_EUREKA=false
+      - EUREKA_CLIENT_FETCH_REGISTRY=false
+
+  # 3. Config Server
+  config-server:
+    build: ./config-server
+    container_name: config-server
+    ports:
+      - "8888:8888"
+    depends_on:
+      eureka-server:
+        condition: service_started
+    environment:
+      # Explicitly point it to the Eureka container
+      - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
+
+  # 4. Admin Service
+  admin-service:
+    build: ./admin-service
+    container_name: admin-service
+    ports:
+      - "8084:8084"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+      config-server:
+        condition: service_started # NOW IT WAITS FOR CONFIG
+    restart: on-failure 
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/admin_db
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=root
+      - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
+      - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
+      - EUREKA_INSTANCE_HOSTNAME=admin-service
+      
+      # THE RE-WIRING: Notice the /configserver at the very end!
+      - SPRING_CLOUD_CONFIG_ENABLED=true
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888/configserver
+      
+      - FEIGN_CLIENT_CONFIG_DELIVERY_SERVICE_URL=http://delivery-service:8082
+      - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
+
+  # 5. Redis (Required for Auth Service)
+  redis:
+    image: redis:alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  # 6. RabbitMQ (Required for Auth Service)
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+
+  # 7. Auth Service
+  auth-service:
+    build: ./auth-service
+    container_name: auth-service
+    ports:
+      - "8081:8081"
+    depends_on:
+      - postgres-db
+      - redis
+      - rabbitmq
+      - eureka-server
+      - config-server
+    restart: on-failure
+    environment:
+      # Point to the same Postgres container but use auth_db
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/auth_db
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=root
+      
+      # Infrastructure Overrides
+      - SPRING_DATA_REDIS_HOST=redis
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      
+      # Discovery & Config (Matching your working Admin Service logic)
+      - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
+      - SPRING_CLOUD_CONFIG_ENABLED=true
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888/configserver
+      
+      # Auth specific secrets
+      - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
+
+  # 8. Delivery Service
+  delivery-service:
+    build: ./delivery-service
+    container_name: delivery-service
+    ports:
+      - "8082:8082"
+    depends_on:
+      - postgres-db
+      - rabbitmq
+      - eureka-server
+      - config-server
+    restart: on-failure
+    environment:
+      # Database
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/delivery_db
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=root
+      
+      # Infrastructure
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      
+      # Discovery & Config
+      - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
+      - SPRING_CLOUD_CONFIG_ENABLED=true
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888/configserver
+      
+      # Feign Override (Preparing for the next service)
+      - FEIGN_CLIENT_CONFIG_TRACKING_SERVICE_URL=http://tracking-service:8083
+      
+      - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
+  # 9. Tracking Service
+  tracking-service:
+    build: ./tracking-service
+    container_name: tracking-service
+    ports:
+      - "8083:8083"
+    depends_on:
+      - postgres-db
+      - rabbitmq
+      - eureka-server
+      - config-server
+    restart: on-failure
+    environment:
+      # Database
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/tracking_db
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=root
+      
+      # Infrastructure
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      
+      # Discovery & Config
+      - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
+      - SPRING_CLOUD_CONFIG_ENABLED=true
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888/configserver
+      
+      - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
+  # 11. Notification Service
+  notification-service:
+    build: ./notification-service
+    container_name: notification-service
+    ports:
+      - "8085:8085"
+    depends_on:
+      - rabbitmq
+      - eureka-server
+      - config-server
+    restart: on-failure
+    environment:
+      # Infrastructure - Point to the 'rabbitmq' container name
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - SPRING_RABBITMQ_PORT=5672
+      - SPRING_RABBITMQ_USERNAME=guest
+      - SPRING_RABBITMQ_PASSWORD=guest
+      
+      # Discovery & Config
+      - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
+      - SPRING_CLOUD_CONFIG_ENABLED=true
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888/configserver
+  # 12. API Gateway (The Front Door)
+  api-gateway:
+    build: ./api-gateway
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+      - eureka-server
+      - config-server
+    restart: on-failure
+    environment:
+      # Redis
+      - SPRING_DATA_REDIS_HOST=redis
+      - SPRING_DATA_REDIS_PORT=6379
+
+      # Eureka
+      - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
+      - EUREKA_CLIENT_REGISTER_WITH_EUREKA=true
+      - EUREKA_CLIENT_FETCH_REGISTRY=true
+      - EUREKA_CLIENT_INITIAL_INSTANCE_INFO_REPLICATION_INTERVAL_SECONDS=5
+      - EUREKA_CLIENT_REGISTRY_FETCH_INTERVAL_SECONDS=5
+
+      # Server, Actuator, Security
+      - SERVER_PORT=8080
+      - MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info
+      - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
+
+      # Swagger UI Configuration
+      - SPRINGDOC_API-DOCS_ENABLED=true
+      - SPRINGDOC_SWAGGER-UI_ENABLED=true
+      - SPRINGDOC_SWAGGER-UI_URLS_0_NAME=Auth Service
+      - SPRINGDOC_SWAGGER-UI_URLS_0_URL=/gateway/auth-docs/v3/api-docs
+      - SPRINGDOC_SWAGGER-UI_URLS_1_NAME=Delivery Service
+      - SPRINGDOC_SWAGGER-UI_URLS_1_URL=/gateway/delivery-docs/v3/api-docs
+      - SPRINGDOC_SWAGGER-UI_URLS_2_NAME=Tracking Service
+      - SPRINGDOC_SWAGGER-UI_URLS_2_URL=/gateway/tracking-docs/v3/api-docs
+      - SPRINGDOC_SWAGGER-UI_URLS_3_NAME=Admin Service
+      - SPRINGDOC_SWAGGER-UI_URLS_3_URL=/gateway/admin-docs/v3/api-docs
+
+      # Gateway Routes — Business Logic
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_0_ID=auth-service
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_0_URI=lb://auth-service
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_0_PREDICATES_0=Path=/gateway/auth/**
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_0_FILTERS_0=StripPrefix=1
+
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_1_ID=delivery-service
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_1_URI=lb://delivery-service
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_1_PREDICATES_0=Path=/gateway/deliveries/**
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_1_FILTERS_0=StripPrefix=1
+
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_2_ID=tracking-service
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_2_URI=lb://tracking-service
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_2_PREDICATES_0=Path=/gateway/tracking/**
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_2_FILTERS_0=StripPrefix=1
+
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_3_ID=admin-service
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_3_URI=lb://admin-service
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_3_PREDICATES_0=Path=/gateway/admin/**
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_3_FILTERS_0=StripPrefix=1
+
+      # API Docs Routes (For Swagger JSON fetching)
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_4_ID=auth-service-docs
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_4_URI=lb://auth-service
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_4_PREDICATES_0=Path=/gateway/auth-docs/**
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_4_FILTERS_0=StripPrefix=2
+
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_5_ID=delivery-service-docs
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_5_URI=lb://delivery-service
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_5_PREDICATES_0=Path=/gateway/delivery-docs/**
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_5_FILTERS_0=StripPrefix=2
+
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_6_ID=tracking-service-docs
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_6_URI=lb://tracking-service
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_6_PREDICATES_0=Path=/gateway/tracking-docs/**
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_6_FILTERS_0=StripPrefix=2
+
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_7_ID=admin-service-docs
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_7_URI=lb://admin-service
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_7_PREDICATES_0=Path=/gateway/admin-docs/**
+      - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_7_FILTERS_0=StripPrefix=2

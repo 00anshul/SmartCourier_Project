@@ -8,6 +8,8 @@ import com.admin_service.entity.ExceptionLog;
 import com.admin_service.entity.Hub;
 import com.admin_service.entity.Report;
 import com.admin_service.service.AdminService;
+
+import io.micrometer.observation.annotation.Observed;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -25,6 +27,7 @@ import java.util.Map;
 @PreAuthorize("hasRole('ADMIN')")
 @CrossOrigin("*")
 @SecurityRequirement(name = "bearerAuth")
+
 public class AdminController {
 
     @Autowired

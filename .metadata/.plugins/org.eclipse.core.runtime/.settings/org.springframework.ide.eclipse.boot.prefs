@@ -17,6 +17,7 @@ org.springframework.ide.eclipse.boot.wizard.PopularityTracker.security=5
 org.springframework.ide.eclipse.boot.wizard.PopularityTracker.springdoc-openapi=5
 org.springframework.ide.eclipse.boot.wizard.PopularityTracker.validation=4
 org.springframework.ide.eclipse.boot.wizard.PopularityTracker.web=9
+org.springframework.ide.eclipse.boot.wizard.PopularityTracker.zipkin=2
 org.springframework.ide.eclipse.boot.wizard.PreferredSelections.artifactId=config-server
 org.springframework.ide.eclipse.boot.wizard.PreferredSelections.bootVersion=4.0.4
 org.springframework.ide.eclipse.boot.wizard.PreferredSelections.groupId=com.smartcourier

@@ -7,6 +7,8 @@ import com.delivery_service.entity.*;
 import com.delivery_service.entity.Package;
 import com.delivery_service.repository.*;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -22,9 +24,12 @@ import java.util.Random;
 
 @Service
 public class DeliveryService {
-	
-	@Autowired
-	private RabbitTemplate rabbitTemplate;
+
+    // 1. Initialize the Logger
+    private static final Logger logger = LoggerFactory.getLogger(DeliveryService.class);
+
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
 
     @Autowired
     private DeliveryRepository deliveryRepository;
@@ -43,15 +48,16 @@ public class DeliveryService {
 
     @Transactional
     public Delivery createDelivery(CreateDeliveryRequest request, Long customerId) {
+        logger.info("Initiating delivery creation for Customer ID: {}, Service Type: {}", customerId, request.getServiceType());
 
         ServiceRate rate = serviceRateRepository
                 .findByServiceType(request.getServiceType())
-                .orElseThrow(() -> new RuntimeException(
-                        "Service rate not configured for: "
-                        + request.getServiceType()));
+                .orElseThrow(() -> {
+                    logger.error("Delivery creation failed: Service rate not configured for {}", request.getServiceType());
+                    return new RuntimeException("Service rate not configured for: " + request.getServiceType());
+                });
 
-        BigDecimal charge = calculateCharge(
-                rate, request.getPackageDetails().getWeightKg());
+        BigDecimal charge = calculateCharge(rate, request.getPackageDetails().getWeightKg());
 
         Delivery delivery = new Delivery();
         delivery.setCustomerId(customerId);
@@ -72,30 +78,33 @@ public class DeliveryService {
         parcel.setDescription(request.getPackageDetails().getDescription());
         packageRepository.save(parcel);
 
-        Address sender = mapAddress(
-                request.getSenderAddress(), saved, "SENDER");
-        Address receiver = mapAddress(
-                request.getReceiverAddress(), saved, "RECEIVER");
+        Address sender = mapAddress(request.getSenderAddress(), saved, "SENDER");
+        Address receiver = mapAddress(request.getReceiverAddress(), saved, "RECEIVER");
         addressRepository.save(sender);
         addressRepository.save(receiver);
 
+        logger.info("Successfully created delivery with Tracking Number: {}", saved.getTrackingNumber());
         return saved;
     }
 
     public Delivery getDeliveryById(Long id) {
         return deliveryRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException(
-                        "Delivery not found with id: " + id));
+                .orElseThrow(() -> {
+                    logger.warn("Delivery lookup failed: No delivery found with ID: {}", id);
+                    return new RuntimeException("Delivery not found with id: " + id);
+                });
     }
 
     public Delivery getDeliveryByTrackingNumber(String trackingNumber) {
         return deliveryRepository.findByTrackingNumber(trackingNumber)
-                .orElseThrow(() -> new RuntimeException(
-                        "Delivery not found with tracking number: "
-                        + trackingNumber));
+                .orElseThrow(() -> {
+                    logger.warn("Delivery lookup failed: No delivery found with Tracking Number: {}", trackingNumber);
+                    return new RuntimeException("Delivery not found with tracking number: " + trackingNumber);
+                });
     }
 
     public Page<Delivery> getMyDeliveries(Long customerId, Pageable pageable) {
+        logger.info("Fetching deliveries for Customer ID: {}", customerId);
         return deliveryRepository.findByCustomerId(customerId, pageable);
     }
 
@@ -104,29 +113,29 @@ public class DeliveryService {
     }
 
     @Transactional
-    public Pickup schedulePickup(Long deliveryId,
-                                  SchedulePickupRequest request,
-                                  Long customerId) {
+    public Pickup schedulePickup(Long deliveryId, SchedulePickupRequest request, Long customerId) {
+        logger.info("Attempting to schedule pickup for Delivery ID: {} by Customer ID: {}", deliveryId, customerId);
 
         Delivery delivery = deliveryRepository.findById(deliveryId)
-                .orElseThrow(() -> new RuntimeException(
-                        "Delivery not found"));
+                .orElseThrow(() -> {
+                    logger.warn("Pickup scheduling failed: Delivery not found with ID: {}", deliveryId);
+                    return new RuntimeException("Delivery not found");
+                });
 
         if (!delivery.getCustomerId().equals(customerId)) {
-            throw new RuntimeException(
-                    "You are not authorized to schedule pickup" +
-                    " for this delivery");
+            logger.warn("Security warning: Customer {} attempted to schedule pickup for unauthorized Delivery {}", customerId, deliveryId);
+            throw new RuntimeException("You are not authorized to schedule pickup for this delivery");
         }
 
         if (pickupRepository.findByDeliveryId(deliveryId).isPresent()) {
-            throw new RuntimeException(
-                    "Pickup already scheduled for this delivery");
+            logger.warn("Pickup scheduling failed: Pickup already exists for Delivery {}", deliveryId);
+            throw new RuntimeException("Pickup already scheduled for this delivery");
         }
 
         LocalDate cutoff = LocalDate.now();
         if (!request.getScheduledDate().isAfter(cutoff)) {
-            throw new RuntimeException(
-                    "Pickup must be scheduled for a future date");
+            logger.warn("Pickup scheduling failed: Requested date {} is not in the future for Delivery {}", request.getScheduledDate(), deliveryId);
+            throw new RuntimeException("Pickup must be scheduled for a future date");
         }
 
         Pickup pickup = new Pickup();
@@ -135,14 +144,20 @@ public class DeliveryService {
         pickup.setSlot(request.getSlot());
         pickup.setStatus("PENDING");
 
-        return pickupRepository.save(pickup);
+        Pickup savedPickup = pickupRepository.save(pickup);
+        logger.info("Successfully scheduled pickup for Delivery ID: {} on {}", deliveryId, request.getScheduledDate());
+        return savedPickup;
     }
 
     @Transactional
     public Delivery updateStatus(Long deliveryId, String status) {
+        logger.info("Attempting to update status for Delivery ID: {} to {}", deliveryId, status);
+
         Delivery delivery = deliveryRepository.findById(deliveryId)
-                .orElseThrow(() -> new RuntimeException(
-                        "Delivery not found"));
+                .orElseThrow(() -> {
+                    logger.warn("Status update failed: Delivery not found with ID: {}", deliveryId);
+                    return new RuntimeException("Delivery not found");
+                });
 
         delivery.setStatus(DeliveryStatus.valueOf(status));
         Delivery saved = deliveryRepository.save(delivery);
@@ -153,14 +168,19 @@ public class DeliveryService {
                 saved.getId() + ":" + saved.getTrackingNumber() + ":" + status
         );
 
+        logger.info("Successfully updated status to {} and published to RabbitMQ for Tracking Number: {}", status, saved.getTrackingNumber());
         return saved;
     }
 
     public BigDecimal getQuote(String serviceType, BigDecimal weightKg) {
+        logger.info("Generating quote for Service Type: {}, Weight: {}kg", serviceType, weightKg);
+        
         ServiceRate rate = serviceRateRepository
                 .findByServiceType(ServiceType.valueOf(serviceType))
-                .orElseThrow(() -> new RuntimeException(
-                        "Service rate not configured"));
+                .orElseThrow(() -> {
+                    logger.error("Quote generation failed: Service rate not configured for {}", serviceType);
+                    return new RuntimeException("Service rate not configured");
+                });
         return calculateCharge(rate, weightKg);
     }
 
@@ -171,8 +191,7 @@ public class DeliveryService {
     }
 
     private String generateTrackingNumber() {
-        String date = LocalDateTime.now()
-                .format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        String date = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
         StringBuilder sb = new StringBuilder();
         Random random = new Random();
@@ -182,11 +201,7 @@ public class DeliveryService {
         return "SC-" + date + "-" + sb;
     }
 
-    private Address mapAddress(
-            com.delivery_service.dto.AddressRequest dto,
-            Delivery delivery,
-            String type) {
-
+    private Address mapAddress(com.delivery_service.dto.AddressRequest dto, Delivery delivery, String type) {
         Address address = new Address();
         address.setDelivery(delivery);
         address.setType(type);

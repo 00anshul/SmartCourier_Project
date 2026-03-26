@@ -1,6 +1,8 @@
 package com.auth_service.entity;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Pattern;
+
 import java.time.LocalDateTime;
 
 @Entity
@@ -15,6 +17,7 @@ public class User {
     private String fullName;
 
     @Column(name = "email", nullable = false, unique = true, length = 150)
+    @Pattern(regexp = "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,6}$", message = "Please provide a valid email address")
     private String email;
 
     @Column(name = "password", nullable = false, length = 255)

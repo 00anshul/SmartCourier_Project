@@ -11,6 +11,8 @@ import com.auth_service.security.JwtUtil;
 
 import jakarta.transaction.Transactional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -26,78 +28,102 @@ import com.auth_service.config.RabbitMQConfig;
 @Service
 public class AuthService {
 
-	@Autowired
-	private RabbitTemplate rabbitTemplate;
+    // 1. Initialize the Logger for Security Auditing
+    private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
 
-	@Autowired
-	private UserRepository userRepository;
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
 
-	@Autowired
-	private RefreshTokenRepository refreshTokenRepository;
+    @Autowired
+    private UserRepository userRepository;
 
-	@Autowired
-	private PasswordEncoder passwordEncoder;
+    @Autowired
+    private RefreshTokenRepository refreshTokenRepository;
 
-	@Autowired
-	private JwtUtil jwtUtil;
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
-	@Autowired
-	private AuthenticationManager authenticationManager;
+    @Autowired
+    private JwtUtil jwtUtil;
 
-	@Value("${jwt.refresh-expiration}")
-	private Long refreshExpiration;
+    @Autowired
+    private AuthenticationManager authenticationManager;
 
-	public User register(RegisterRequest request) {
+    @Value("${jwt.refresh-expiration}")
+    private Long refreshExpiration;
 
-		if (userRepository.existsByEmail(request.getEmail())) {
-			throw new RuntimeException("Email already registered");
-		}
+    public User register(RegisterRequest request) {
+        logger.info("Registration attempt for email: {}", request.getEmail());
 
-		User user = new User();
-		user.setFullName(request.getFullName());
-		user.setEmail(request.getEmail());
-		user.setPassword(passwordEncoder.encode(request.getPassword()));
-		user.setPhone(request.getPhone());
-		user.setRole("CUSTOMER");
-		rabbitTemplate.convertAndSend(RabbitMQConfig.USER_REGISTERED_EXCHANGE, RabbitMQConfig.USER_REGISTERED_KEY,
-				user.getEmail());
+        if (userRepository.existsByEmail(request.getEmail())) {
+            logger.warn("Registration failed: Email already exists - {}", request.getEmail());
+            throw new RuntimeException("Email already registered");
+        }
 
-		return userRepository.save(user);
-	}
-	
-	
-@Transactional
-	public AuthResponse login(LoginRequest request) {
+        User user = new User();
+        user.setFullName(request.getFullName());
+        user.setEmail(request.getEmail());
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setPhone(request.getPhone());
+        user.setRole("CUSTOMER");
+        
+        User savedUser = userRepository.save(user);
+        logger.info("User successfully registered with ID: {}", savedUser.getId());
 
-		authenticationManager
-				.authenticate(new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
+        rabbitTemplate.convertAndSend(RabbitMQConfig.USER_REGISTERED_EXCHANGE, RabbitMQConfig.USER_REGISTERED_KEY,
+                user.getEmail());
+        logger.info("Published registration event to RabbitMQ for email: {}", user.getEmail());
 
-		User user = userRepository.findByEmail(request.getEmail())
-				.orElseThrow(() -> new RuntimeException("User not found"));
+        return savedUser;
+    }
+    
+    @Transactional
+    public AuthResponse login(LoginRequest request) {
+        logger.info("Login attempt for email: {}", request.getEmail());
 
-		String accessToken = jwtUtil.generateToken(user.getEmail(), user.getRole(), user.getId());
+        // Note: If this fails, Spring Security automatically throws an exception (BadCredentialsException)
+        authenticationManager
+                .authenticate(new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
 
-		createRefreshToken(user);
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> {
+                    logger.error("Login critical error: Authenticated user not found in database - {}", request.getEmail());
+                    return new RuntimeException("User not found");
+                });
 
-		return new AuthResponse(accessToken, user.getRole(), user.getId(), user.getFullName());
-	}
+        String accessToken = jwtUtil.generateToken(user.getEmail(), user.getRole(), user.getId());
+        logger.info("JWT Access Token generated successfully for User ID: {}", user.getId());
 
-	private RefreshToken createRefreshToken(User user) {
-		refreshTokenRepository.deleteByUser_Id(user.getId());
+        createRefreshToken(user);
 
-		RefreshToken refreshToken = new RefreshToken();
-		refreshToken.setUser(user);
-		refreshToken.setToken(UUID.randomUUID().toString());
-		refreshToken.setExpiresAt(LocalDateTime.now().plusSeconds(refreshExpiration / 1000));
+        return new AuthResponse(accessToken, user.getRole(), user.getId(), user.getFullName());
+    }
 
-		return refreshTokenRepository.save(refreshToken);
-	}
+    private RefreshToken createRefreshToken(User user) {
+        logger.debug("Deleting old refresh tokens for User ID: {}", user.getId());
+        refreshTokenRepository.deleteByUser_Id(user.getId());
 
-	public void logout(Long userId) {
-		refreshTokenRepository.deleteByUser_Id(userId);
-	}
+        RefreshToken refreshToken = new RefreshToken();
+        refreshToken.setUser(user);
+        refreshToken.setToken(UUID.randomUUID().toString());
+        refreshToken.setExpiresAt(LocalDateTime.now().plusSeconds(refreshExpiration / 1000));
 
-	public User getUserById(Long id) {
-		return userRepository.findById(id).orElseThrow(() -> new RuntimeException("User not found"));
-	}
+        RefreshToken savedToken = refreshTokenRepository.save(refreshToken);
+        logger.info("New refresh token generated for User ID: {}", user.getId());
+        
+        return savedToken;
+    }
+
+    public void logout(Long userId) {
+        logger.info("Logout requested for User ID: {}", userId);
+        refreshTokenRepository.deleteByUser_Id(userId);
+        logger.info("Refresh tokens successfully cleared for User ID: {}", userId);
+    }
+
+    public User getUserById(Long id) {
+        return userRepository.findById(id).orElseThrow(() -> {
+            logger.warn("User lookup failed: No user found with ID: {}", id);
+            return new RuntimeException("User not found");
+        });
+    }
 }
