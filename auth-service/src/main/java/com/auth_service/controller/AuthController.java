@@ -12,6 +12,7 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -42,6 +43,7 @@ public class AuthController {
                 new ApiResponse<>(true, "Login successful", response));
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/logout")
     public ResponseEntity<ApiResponse<String>> logout(
             @RequestHeader("X-User-Id") Long userId) {
@@ -51,6 +53,7 @@ public class AuthController {
                 new ApiResponse<>(true, "Logged out successfully", null));
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @GetMapping("/users/{id}")
     public ResponseEntity<ApiResponse<User>> getUserById(
             @PathVariable Long id) {

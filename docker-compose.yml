@@ -63,6 +63,7 @@ services:
       - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
       - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
       - EUREKA_INSTANCE_HOSTNAME=admin-service
+      - SERVER_FORWARD_HEADERS_STRATEGY=framework
       
       # THE RE-WIRING: Notice the /configserver at the very end!
       - SPRING_CLOUD_CONFIG_ENABLED=true
@@ -107,6 +108,7 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/auth_db
       - SPRING_DATASOURCE_USERNAME=postgres
       - SPRING_DATASOURCE_PASSWORD=root
+      - SERVER_FORWARD_HEADERS_STRATEGY=framework
       
       # Infrastructure Overrides
       - SPRING_DATA_REDIS_HOST=redis
@@ -137,6 +139,7 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/delivery_db
       - SPRING_DATASOURCE_USERNAME=postgres
       - SPRING_DATASOURCE_PASSWORD=root
+      - SERVER_FORWARD_HEADERS_STRATEGY=framework
       
       # Infrastructure
       - SPRING_RABBITMQ_HOST=rabbitmq
@@ -167,6 +170,7 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/tracking_db
       - SPRING_DATASOURCE_USERNAME=postgres
       - SPRING_DATASOURCE_PASSWORD=root
+      - SERVER_FORWARD_HEADERS_STRATEGY=framework
       
       # Infrastructure
       - SPRING_RABBITMQ_HOST=rabbitmq
@@ -211,6 +215,7 @@ services:
       - config-server
     restart: on-failure
     environment:
+      - SERVER_FORWARD_HEADERS_STRATEGY=framework
       # Redis
       - SPRING_DATA_REDIS_HOST=redis
       - SPRING_DATA_REDIS_PORT=6379

@@ -113,13 +113,14 @@ public class AuthService {
         
         return savedToken;
     }
-
+    @Transactional
     public void logout(Long userId) {
         logger.info("Logout requested for User ID: {}", userId);
         refreshTokenRepository.deleteByUser_Id(userId);
         logger.info("Refresh tokens successfully cleared for User ID: {}", userId);
     }
 
+    
     public User getUserById(Long id) {
         return userRepository.findById(id).orElseThrow(() -> {
             logger.warn("User lookup failed: No user found with ID: {}", id);
