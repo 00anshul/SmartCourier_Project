@@ -13,6 +13,7 @@ services:
       - "5433:5432"
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql # THE PERMANENT FIX
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d admin_db"]
       interval: 5s
@@ -42,6 +43,16 @@ services:
       # Explicitly point it to the Eureka container
       - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
 
+  zipkin:
+    image: ghcr.io/openzipkin/zipkin-slim:latest
+    container_name: zipkin
+    ports:
+      - "9411:9411"
+    environment:
+      - STORAGE_TYPE=mem # Keeps traces in memory (fast, resets on restart)
+
+
+
   # 4. Admin Service
   admin-service:
     build: ./admin-service
@@ -64,6 +75,7 @@ services:
       - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
       - EUREKA_INSTANCE_HOSTNAME=admin-service
       - SERVER_FORWARD_HEADERS_STRATEGY=framework
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
       
       # THE RE-WIRING: Notice the /configserver at the very end!
       - SPRING_CLOUD_CONFIG_ENABLED=true
@@ -109,6 +121,7 @@ services:
       - SPRING_DATASOURCE_USERNAME=postgres
       - SPRING_DATASOURCE_PASSWORD=root
       - SERVER_FORWARD_HEADERS_STRATEGY=framework
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
       
       # Infrastructure Overrides
       - SPRING_DATA_REDIS_HOST=redis
@@ -128,6 +141,7 @@ services:
     container_name: delivery-service
     ports:
       - "8082:8082"
+          
     depends_on:
       - postgres-db
       - rabbitmq
@@ -140,6 +154,7 @@ services:
       - SPRING_DATASOURCE_USERNAME=postgres
       - SPRING_DATASOURCE_PASSWORD=root
       - SERVER_FORWARD_HEADERS_STRATEGY=framework
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
       
       # Infrastructure
       - SPRING_RABBITMQ_HOST=rabbitmq
@@ -151,6 +166,7 @@ services:
       
       # Feign Override (Preparing for the next service)
       - FEIGN_CLIENT_CONFIG_TRACKING_SERVICE_URL=http://tracking-service:8083
+      - SERVER_PORT=8082
       
       - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
   # 9. Tracking Service
@@ -171,6 +187,7 @@ services:
       - SPRING_DATASOURCE_USERNAME=postgres
       - SPRING_DATASOURCE_PASSWORD=root
       - SERVER_FORWARD_HEADERS_STRATEGY=framework
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
       
       # Infrastructure
       - SPRING_RABBITMQ_HOST=rabbitmq
@@ -285,3 +302,5 @@ services:
       - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_7_URI=lb://admin-service
       - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_7_PREDICATES_0=Path=/gateway/admin-docs/**
       - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_7_FILTERS_0=StripPrefix=2
+volumes:
+  postgres_data:
