@@ -20,7 +20,7 @@ public class SwaggerConfig {
     OpenAPI openAPI() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("Delivery Service API")
+                        .title("Auth Service API")
                         .description("SmartCourier Delivery Service")
                         .version("1.0"));
     }
