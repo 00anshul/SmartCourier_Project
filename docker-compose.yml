@@ -1,7 +1,9 @@
 version: '3.8'
 
+volumes:
+  postgres_data:
 services:
-  # 1. The Database
+  # A. The Database
   postgres-db:
     image: postgres:15-alpine
     container_name: postgres-db
@@ -12,7 +14,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql # THE PERMANENT FIX
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql 
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d admin_db"]
@@ -20,7 +22,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 2. Eureka Server
+  # B. Eureka Server
   eureka-server:
     build: ./eureka-server
     container_name: eureka-server
@@ -30,7 +32,7 @@ services:
       - EUREKA_CLIENT_REGISTER_WITH_EUREKA=false
       - EUREKA_CLIENT_FETCH_REGISTRY=false
 
-  # 3. Config Server
+  # C. Config Server
   config-server:
     build: ./config-server
     container_name: config-server
@@ -43,6 +45,7 @@ services:
       # Explicitly point it to the Eureka container
       - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
 
+  # D. Zipkin 
   zipkin:
     image: ghcr.io/openzipkin/zipkin-slim:latest
     container_name: zipkin
@@ -51,47 +54,14 @@ services:
     environment:
       - STORAGE_TYPE=mem # Keeps traces in memory (fast, resets on restart)
 
-
-
-  # 4. Admin Service
-  admin-service:
-    build: ./admin-service
-    container_name: admin-service
-    ports:
-      - "8084:8084"
-    depends_on:
-      postgres-db:
-        condition: service_healthy
-      eureka-server:
-        condition: service_started
-      config-server:
-        condition: service_started # NOW IT WAITS FOR CONFIG
-    restart: on-failure 
-    environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/admin_db
-      - SPRING_DATASOURCE_USERNAME=postgres
-      - SPRING_DATASOURCE_PASSWORD=root
-      - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
-      - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
-      - EUREKA_INSTANCE_HOSTNAME=admin-service
-      - SERVER_FORWARD_HEADERS_STRATEGY=framework
-      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
-      
-      # THE RE-WIRING: Notice the /configserver at the very end!
-      - SPRING_CLOUD_CONFIG_ENABLED=true
-      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888/configserver
-      
-      - FEIGN_CLIENT_CONFIG_DELIVERY_SERVICE_URL=http://delivery-service:8082
-      - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
-
-  # 5. Redis (Required for Auth Service)
+  # E. Redis (Required for Auth Service)
   redis:
     image: redis:alpine
     container_name: redis
     ports:
       - "6379:6379"
 
-  # 6. RabbitMQ (Required for Auth Service)
+  # F. RabbitMQ (Required for Auth Service)
   rabbitmq:
     image: rabbitmq:3-management-alpine
     container_name: rabbitmq
@@ -102,7 +72,42 @@ services:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
 
-  # 7. Auth Service
+  # 1. Admin Service
+  admin-service:
+    build: ./admin-service
+    container_name: admin-service
+    ports:
+      - "8084:8084"
+    depends_on:
+      - postgres-db
+      - eureka-server
+      - config-server
+      - zipkin
+       
+    restart: on-failure 
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/admin_db
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=root
+      - SERVER_FORWARD_HEADERS_STRATEGY=framework
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+
+      - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
+      - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
+      - EUREKA_INSTANCE_HOSTNAME=admin-service
+
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0
+      - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=http://zipkin:9411/api/v2/spans
+      - LOGGING_PATTERN_LEVEL=%5p [$${spring.application.name:},%X{traceId:-},%X{spanId:-}]
+      
+      # THE RE-WIRING: Notice the /configserver at the very end!
+      - SPRING_CLOUD_CONFIG_ENABLED=true
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888/configserver
+      
+      - FEIGN_CLIENT_CONFIG_DELIVERY_SERVICE_URL=http://delivery-service:8082
+      - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
+
+  # 2. Auth Service
   auth-service:
     build: ./auth-service
     container_name: auth-service
@@ -114,6 +119,7 @@ services:
       - rabbitmq
       - eureka-server
       - config-server
+      - zipkin
     restart: on-failure
     environment:
       # Point to the same Postgres container but use auth_db
@@ -122,6 +128,10 @@ services:
       - SPRING_DATASOURCE_PASSWORD=root
       - SERVER_FORWARD_HEADERS_STRATEGY=framework
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0
+      - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=http://zipkin:9411/api/v2/spans
+      - LOGGING_PATTERN_LEVEL=%5p [$${spring.application.name:},%X{traceId:-},%X{spanId:-}]
       
       # Infrastructure Overrides
       - SPRING_DATA_REDIS_HOST=redis
@@ -135,7 +145,7 @@ services:
       # Auth specific secrets
       - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
 
-  # 8. Delivery Service
+  # 3. Delivery Service
   delivery-service:
     build: ./delivery-service
     container_name: delivery-service
@@ -147,6 +157,7 @@ services:
       - rabbitmq
       - eureka-server
       - config-server
+      - zipkin
     restart: on-failure
     environment:
       # Database
@@ -155,6 +166,10 @@ services:
       - SPRING_DATASOURCE_PASSWORD=root
       - SERVER_FORWARD_HEADERS_STRATEGY=framework
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0
+      - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=http://zipkin:9411/api/v2/spans
+      - LOGGING_PATTERN_LEVEL=%5p [$${spring.application.name:},%X{traceId:-},%X{spanId:-}]
       
       # Infrastructure
       - SPRING_RABBITMQ_HOST=rabbitmq
@@ -169,7 +184,8 @@ services:
       - SERVER_PORT=8082
       
       - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
-  # 9. Tracking Service
+
+  # 4. Tracking Service
   tracking-service:
     build: ./tracking-service
     container_name: tracking-service
@@ -180,6 +196,7 @@ services:
       - rabbitmq
       - eureka-server
       - config-server
+      - zipkin
     restart: on-failure
     environment:
       # Database
@@ -188,6 +205,10 @@ services:
       - SPRING_DATASOURCE_PASSWORD=root
       - SERVER_FORWARD_HEADERS_STRATEGY=framework
       - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0
+      - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=http://zipkin:9411/api/v2/spans
+      - LOGGING_PATTERN_LEVEL=%5p [$${spring.application.name:},%X{traceId:-},%X{spanId:-}]
       
       # Infrastructure
       - SPRING_RABBITMQ_HOST=rabbitmq
@@ -198,7 +219,8 @@ services:
       - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888/configserver
       
       - JWT_SECRET=5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
-  # 11. Notification Service
+
+  # 5. Notification Service
   notification-service:
     build: ./notification-service
     container_name: notification-service
@@ -208,6 +230,7 @@ services:
       - rabbitmq
       - eureka-server
       - config-server
+      - zipkin
     restart: on-failure
     environment:
       # Infrastructure - Point to the 'rabbitmq' container name
@@ -215,12 +238,17 @@ services:
       - SPRING_RABBITMQ_PORT=5672
       - SPRING_RABBITMQ_USERNAME=guest
       - SPRING_RABBITMQ_PASSWORD=guest
+
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0
+      - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=http://zipkin:9411/api/v2/spans
+      - LOGGING_PATTERN_LEVEL=%5p [$${spring.application.name:},%X{traceId:-},%X{spanId:-}]
       
       # Discovery & Config
       - eureka.client.serviceUrl.defaultZone=http://eureka-server:8761/eureka/
       - SPRING_CLOUD_CONFIG_ENABLED=true
       - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888/configserver
-  # 12. API Gateway (The Front Door)
+
+  # 6. API Gateway (The Front Door)
   api-gateway:
     build: ./api-gateway
     container_name: api-gateway
@@ -230,9 +258,14 @@ services:
       - redis
       - eureka-server
       - config-server
+      - zipkin
     restart: on-failure
     environment:
       - SERVER_FORWARD_HEADERS_STRATEGY=framework
+
+      - MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0
+      - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=http://zipkin:9411/api/v2/spans
+      - LOGGING_PATTERN_LEVEL=%5p [$${spring.application.name:},%X{traceId:-},%X{spanId:-}]
       # Redis
       - SPRING_DATA_REDIS_HOST=redis
       - SPRING_DATA_REDIS_PORT=6379
@@ -302,5 +335,3 @@ services:
       - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_7_URI=lb://admin-service
       - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_7_PREDICATES_0=Path=/gateway/admin-docs/**
       - SPRING_CLOUD_GATEWAY_SERVER_WEBMVC_ROUTES_7_FILTERS_0=StripPrefix=2
-volumes:
-  postgres_data:

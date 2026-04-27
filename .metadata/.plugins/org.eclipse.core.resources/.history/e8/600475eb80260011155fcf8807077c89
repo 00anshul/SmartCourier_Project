@@ -1,5 +1,0 @@
-package com.delivery_service.dto;
-
-public class PackageRequest {
-
-}

@@ -11,6 +11,8 @@ import com.admin_service.repository.ExceptionLogRepository;
 import com.admin_service.repository.HubRepository;
 import com.admin_service.repository.ReportRepository;
 
+import io.micrometer.tracing.Tracer;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -209,7 +211,7 @@ public class AdminService {
 
     public Map<String, Object> getDashboard() {
         logger.info("Compiling Admin Dashboard summary metrics");
-        
+       
         Map<String, Object> dashboard = new HashMap<>();
         dashboard.put("totalHubs", hubRepository.count());
         dashboard.put("activeHubs", hubRepository.findByIsActive(true).size());

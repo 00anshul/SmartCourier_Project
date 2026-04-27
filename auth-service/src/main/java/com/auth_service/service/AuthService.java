@@ -13,7 +13,6 @@ import jakarta.transaction.Transactional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -28,103 +27,115 @@ import com.auth_service.config.RabbitMQConfig;
 @Service
 public class AuthService {
 
-    // 1. Initialize the Logger for Security Auditing
-    private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
+	// 1. Initialize the Logger for Security Auditing
+	private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
 
-    @Autowired
-    private RabbitTemplate rabbitTemplate;
+	private RedisTokenService redisTokenService;
+	private RabbitTemplate rabbitTemplate;
+	private UserRepository userRepository;
+	private RefreshTokenRepository refreshTokenRepository;
+	private PasswordEncoder passwordEncoder;
+	private JwtUtil jwtUtil;
+	private AuthenticationManager authenticationManager;
+	
+	public AuthService(UserRepository userRepository,
+	                   RefreshTokenRepository refreshTokenRepository,
+	                   PasswordEncoder passwordEncoder,
+	                   JwtUtil jwtUtil,
+	                   AuthenticationManager authenticationManager,
+	                   RabbitTemplate rabbitTemplate,
+	                   RedisTokenService redisTokenService,
+	                   @Value("${jwt.refresh-expiration}") Long refreshExpiration) {
+	    this.userRepository = userRepository;
+	    this.refreshTokenRepository = refreshTokenRepository;
+	    this.passwordEncoder = passwordEncoder;
+	    this.jwtUtil = jwtUtil;
+	    this.authenticationManager = authenticationManager;
+	    this.rabbitTemplate = rabbitTemplate;
+	    this.redisTokenService = redisTokenService;
+	    this.refreshExpiration = refreshExpiration;
+	}
 
-    @Autowired
-    private UserRepository userRepository;
 
-    @Autowired
-    private RefreshTokenRepository refreshTokenRepository;
+	@Value("${jwt.refresh-expiration}")
+	private Long refreshExpiration;
 
-    @Autowired
-    private PasswordEncoder passwordEncoder;
+	public User register(RegisterRequest request) {
+		logger.info("Registration attempt for email: {}", request.getEmail());
 
-    @Autowired
-    private JwtUtil jwtUtil;
+		if (userRepository.existsByEmail(request.getEmail())) {
+			logger.warn("Registration failed: Email already exists - {}", request.getEmail());
+			throw new RuntimeException("Email already registered");
+		}
 
-    @Autowired
-    private AuthenticationManager authenticationManager;
+		User user = new User();
+		user.setFullName(request.getFullName());
+		user.setEmail(request.getEmail());
+		user.setPassword(passwordEncoder.encode(request.getPassword()));
+		user.setPhone(request.getPhone());
+		user.setRole("CUSTOMER");
 
-    @Value("${jwt.refresh-expiration}")
-    private Long refreshExpiration;
+		User savedUser = userRepository.save(user);
+		logger.info("User successfully registered with ID: {}", savedUser.getId());
 
-    public User register(RegisterRequest request) {
-        logger.info("Registration attempt for email: {}", request.getEmail());
+		rabbitTemplate.convertAndSend(RabbitMQConfig.USER_REGISTERED_EXCHANGE, RabbitMQConfig.USER_REGISTERED_KEY,
+				user.getEmail());
+		logger.info("Published registration event to RabbitMQ for email: {}", user.getEmail());
 
-        if (userRepository.existsByEmail(request.getEmail())) {
-            logger.warn("Registration failed: Email already exists - {}", request.getEmail());
-            throw new RuntimeException("Email already registered");
-        }
+		return savedUser;
+	}
 
-        User user = new User();
-        user.setFullName(request.getFullName());
-        user.setEmail(request.getEmail());
-        user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setPhone(request.getPhone());
-        user.setRole("CUSTOMER");
-        
-        User savedUser = userRepository.save(user);
-        logger.info("User successfully registered with ID: {}", savedUser.getId());
+	@Transactional
+	public AuthResponse login(LoginRequest request) {
+		logger.info("Login attempt for email: {}", request.getEmail());
 
-        rabbitTemplate.convertAndSend(RabbitMQConfig.USER_REGISTERED_EXCHANGE, RabbitMQConfig.USER_REGISTERED_KEY,
-                user.getEmail());
-        logger.info("Published registration event to RabbitMQ for email: {}", user.getEmail());
+		// Note: If this fails, Spring Security automatically throws an exception
+		// (BadCredentialsException)
+		authenticationManager
+				.authenticate(new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
 
-        return savedUser;
-    }
-    
-    @Transactional
-    public AuthResponse login(LoginRequest request) {
-        logger.info("Login attempt for email: {}", request.getEmail());
+		User user = userRepository.findByEmail(request.getEmail()).orElseThrow(() -> {
+			logger.error("Login critical error: Authenticated user not found in database - {}", request.getEmail());
+			return new RuntimeException("User not found");
+		});
 
-        // Note: If this fails, Spring Security automatically throws an exception (BadCredentialsException)
-        authenticationManager
-                .authenticate(new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
+		String accessToken = jwtUtil.generateToken(user.getEmail(), user.getRole(), user.getId());
+		logger.info("JWT Access Token generated successfully for User ID: {}", user.getId());
+		 // Store in Redis
+	    redisTokenService.storeToken(user.getId(), accessToken);
 
-        User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> {
-                    logger.error("Login critical error: Authenticated user not found in database - {}", request.getEmail());
-                    return new RuntimeException("User not found");
-                });
+		createRefreshToken(user);
 
-        String accessToken = jwtUtil.generateToken(user.getEmail(), user.getRole(), user.getId());
-        logger.info("JWT Access Token generated successfully for User ID: {}", user.getId());
+		return new AuthResponse(accessToken, user.getRole(), user.getId(), user.getFullName());
+	}
 
-        createRefreshToken(user);
+	private RefreshToken createRefreshToken(User user) {
+		logger.debug("Deleting old refresh tokens for User ID: {}", user.getId());
+		refreshTokenRepository.deleteByUser_Id(user.getId());
 
-        return new AuthResponse(accessToken, user.getRole(), user.getId(), user.getFullName());
-    }
+		RefreshToken refreshToken = new RefreshToken();
+		refreshToken.setUser(user);
+		refreshToken.setToken(UUID.randomUUID().toString());
+		refreshToken.setExpiresAt(LocalDateTime.now().plusSeconds(refreshExpiration / 1000));
 
-    private RefreshToken createRefreshToken(User user) {
-        logger.debug("Deleting old refresh tokens for User ID: {}", user.getId());
-        refreshTokenRepository.deleteByUser_Id(user.getId());
+		RefreshToken savedToken = refreshTokenRepository.save(refreshToken);
+		logger.info("New refresh token generated for User ID: {}", user.getId());
 
-        RefreshToken refreshToken = new RefreshToken();
-        refreshToken.setUser(user);
-        refreshToken.setToken(UUID.randomUUID().toString());
-        refreshToken.setExpiresAt(LocalDateTime.now().plusSeconds(refreshExpiration / 1000));
+		return savedToken;
+	}
 
-        RefreshToken savedToken = refreshTokenRepository.save(refreshToken);
-        logger.info("New refresh token generated for User ID: {}", user.getId());
-        
-        return savedToken;
-    }
-    @Transactional
-    public void logout(Long userId) {
-        logger.info("Logout requested for User ID: {}", userId);
-        refreshTokenRepository.deleteByUser_Id(userId);
-        logger.info("Refresh tokens successfully cleared for User ID: {}", userId);
-    }
+	@Transactional
+	public void logout(Long userId) {
+		logger.info("Logout requested for User ID: {}", userId);
+		refreshTokenRepository.deleteByUser_Id(userId);
+		redisTokenService.deleteToken(userId);
+		logger.info("Refresh tokens successfully cleared for User ID: {}", userId);
+	}
 
-    
-    public User getUserById(Long id) {
-        return userRepository.findById(id).orElseThrow(() -> {
-            logger.warn("User lookup failed: No user found with ID: {}", id);
-            return new RuntimeException("User not found");
-        });
-    }
+	public User getUserById(Long id) {
+		return userRepository.findById(id).orElseThrow(() -> {
+			logger.warn("User lookup failed: No user found with ID: {}", id);
+			return new RuntimeException("User not found");
+		});
+	}
 }

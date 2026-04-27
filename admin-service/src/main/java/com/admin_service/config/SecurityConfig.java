@@ -26,7 +26,7 @@ public class SecurityConfig {
     @Autowired
     private JwtAuthFilter jwtAuthFilter;
 
-    // ADDED: CORS Bean to handle cross-origin requests from Swagger UI
+    // CORS Bean to handle cross-origin requests from Swagger UI
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
@@ -44,7 +44,7 @@ public class SecurityConfig {
     SecurityFilterChain securityFilterChain(HttpSecurity http)
             throws Exception {
         http
-            // ADDED: Link the CORS configuration to the filter chain
+            // Link the CORS configuration to the filter chain
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session

@@ -12,6 +12,8 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import com.auth_service.service.RedisTokenService;
+
 import java.io.IOException;
 import java.util.Collections;
 
@@ -20,6 +22,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     @Autowired
     private JwtUtil jwtUtil;
+    @Autowired
+    private  RedisTokenService redisTokenService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -44,6 +48,16 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String email   = jwtUtil.extractEmail(token);
         String role    = jwtUtil.extractRole(token);
         Long userId    = jwtUtil.extractUserId(token);
+        
+     // ── Redis check ──────────────────────────────────────
+        if (!redisTokenService.isTokenActive(userId, token)) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.setContentType("application/json");
+            response.getWriter().write(
+                "{\"success\": false, \"message\": \"Token has been invalidated. Please login again.\"}"
+            );
+            return;
+        }
 
         UsernamePasswordAuthenticationToken authentication =
                 new UsernamePasswordAuthenticationToken(
