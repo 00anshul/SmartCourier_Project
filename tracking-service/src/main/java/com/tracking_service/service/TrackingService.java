@@ -40,7 +40,7 @@ public class TrackingService {
     // Consumes delivery status change messages from RabbitMQ
     @RabbitListener(queues = RabbitMQConfig.DELIVERY_STATUS_QUEUE)
     public void consumeDeliveryStatusChange(String message) {
-        String[] parts = message.split(":");
+        String[] parts = message.split(":", -1);
         
         // 1. If the message format is wrong, reject it to the DLQ immediately
         if (parts.length < 3) {
@@ -53,13 +53,30 @@ public class TrackingService {
             String trackingNumber = parts[1];
             String status         = parts[2];
 
-            logger.info("Processing status update from RabbitMQ - Tracking: {}, Status: {}", trackingNumber, status);
+            Long hubId = null;
+            if (parts.length > 3 && !parts[3].isEmpty()) {
+                hubId = Long.parseLong(parts[3]);
+            }
+
+            String location = null;
+            if (parts.length > 4 && !parts[4].isEmpty()) {
+                location = parts[4];
+            }
+
+            logger.info("Processing status update from RabbitMQ - Tracking: {}, Status: {}, HubId: {}", trackingNumber, status, hubId);
 
             TrackingEvent event = new TrackingEvent();
             event.setDeliveryId(deliveryId);
             event.setTrackingNumber(trackingNumber);
             event.setStatus(status);
-            event.setLocationDescription("Status updated to " + status);
+            if (hubId != null) {
+                event.setHubId(hubId);
+            }
+            if (location != null) {
+                event.setLocationDescription("Status updated at " + location);
+            } else {
+                event.setLocationDescription("Status updated to " + status);
+            }
 
             trackingEventRepository.save(event);
             logger.info("Successfully saved tracking event for Delivery ID: {}", deliveryId);

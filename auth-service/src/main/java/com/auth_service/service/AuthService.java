@@ -60,29 +60,43 @@ public class AuthService {
 	@Value("${jwt.refresh-expiration}")
 	private Long refreshExpiration;
 
+	@Transactional
 	public User register(RegisterRequest request) {
 		logger.info("Registration attempt for email: {}", request.getEmail());
+		try {
+			if (userRepository.existsByEmail(request.getEmail())) {
+				logger.warn("Registration failed: Email already exists - {}", request.getEmail());
+				throw new RuntimeException("Email already registered");
+			}
 
-		if (userRepository.existsByEmail(request.getEmail())) {
-			logger.warn("Registration failed: Email already exists - {}", request.getEmail());
-			throw new RuntimeException("Email already registered");
+			User user = new User();
+			user.setFullName(request.getFullName());
+			user.setEmail(request.getEmail());
+			user.setPassword(passwordEncoder.encode(request.getPassword()));
+			user.setPhone(request.getPhone());
+			user.setRole("CUSTOMER");
+
+			User savedUser = userRepository.save(user);
+			logger.info("User successfully registered with ID: {}", savedUser.getId());
+
+			try {
+				rabbitTemplate.convertAndSend(RabbitMQConfig.USER_REGISTERED_EXCHANGE, RabbitMQConfig.USER_REGISTERED_KEY,
+						user.getEmail());
+				logger.info("Published registration event to RabbitMQ for email: {}", user.getEmail());
+			} catch (Exception e) {
+				// Non-fatal: registration succeeds even if notification fails
+				logger.warn("Failed to publish registration event to RabbitMQ for email: {} — {}", user.getEmail(), e.getMessage());
+			}
+
+			return savedUser;
+
+		} catch (RuntimeException e) {
+			// Rethrow RuntimeExceptions (e.g. "Email already registered") as-is
+			throw e;
+		} catch (Exception e) {
+			logger.error("Unexpected error during registration for email: {}", request.getEmail(), e);
+			throw new RuntimeException("Registration failed: " + e.getMessage(), e);
 		}
-
-		User user = new User();
-		user.setFullName(request.getFullName());
-		user.setEmail(request.getEmail());
-		user.setPassword(passwordEncoder.encode(request.getPassword()));
-		user.setPhone(request.getPhone());
-		user.setRole("CUSTOMER");
-
-		User savedUser = userRepository.save(user);
-		logger.info("User successfully registered with ID: {}", savedUser.getId());
-
-		rabbitTemplate.convertAndSend(RabbitMQConfig.USER_REGISTERED_EXCHANGE, RabbitMQConfig.USER_REGISTERED_KEY,
-				user.getEmail());
-		logger.info("Published registration event to RabbitMQ for email: {}", user.getEmail());
-
-		return savedUser;
 	}
 
 	@Transactional

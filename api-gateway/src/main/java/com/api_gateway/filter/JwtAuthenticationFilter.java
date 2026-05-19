@@ -22,21 +22,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private String secret;
 
     private static final List<String> PUBLIC_PATHS = List.of(
+            // Auth endpoints — gateway receives these before routing to auth-service
             "/gateway/auth/register",
             "/gateway/auth/login",
             "/gateway/auth/refresh",
+            "/gateway/auth/logout",
+            // Swagger & Actuator
             "/actuator",
             "/v3/api-docs",
             "/swagger-ui",
-            "/gateway/auth/v3/api-docs",
-            "/gateway/deliveries/v3/api-docs",
-            "/gateway/tracking/v3/api-docs",
-            "/gateway/admin/v3/api-docs",
             "/gateway/auth-docs",
             "/gateway/delivery-docs",
             "/gateway/tracking-docs",
-            "/gateway/admin-docs"
-    );
+            "/gateway/admin-docs");
 
     private SecretKey getSigningKey() {
         byte[] keyBytes = hexStringToByteArray(secret);
@@ -55,9 +53,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain)
+            HttpServletResponse response,
+            FilterChain filterChain)
             throws ServletException, IOException {
+        System.out.println(">>> JWT Filter path: " + request.getRequestURI());
+
+        // Let CORS preflight through immediately
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            filterChain.doFilter(request, response);
+            return;
+        }
 
         String path = request.getRequestURI();
 
@@ -89,7 +94,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             // Forward user info to downstream services as headers
             request.setAttribute("userId", claims.get("userId"));
-            request.setAttribute("role",   claims.get("role"));
+            request.setAttribute("role", claims.get("role"));
 
             filterChain.doFilter(request, response);
 

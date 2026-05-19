@@ -10,5 +10,6 @@ public enum DeliveryStatus {
     DELAYED,
     FAILED,
     RETURNED,
-    REFUNDED
+    REFUNDED,
+    CANCELLED
 }

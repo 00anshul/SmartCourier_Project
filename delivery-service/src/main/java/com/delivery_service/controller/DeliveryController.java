@@ -93,13 +93,27 @@ public class DeliveryController {
                         "Pickup scheduled successfully", pickup));
     }
 
+    @PutMapping("/{id}/cancel")
+    @PreAuthorize("hasRole('CUSTOMER')")
+    public ResponseEntity<ApiResponse<Delivery>> cancelDelivery(
+            @PathVariable Long id,
+            HttpServletRequest httpRequest) {
+
+        Long customerId = (Long) httpRequest.getAttribute("userId");
+        Delivery delivery = deliveryService.cancelDelivery(id, customerId);
+        return ResponseEntity.ok(
+                new ApiResponse<>(true, "Delivery cancelled successfully", delivery));
+    }
+
     @PutMapping("/{id}/status")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<Delivery>> updateStatus(
             @PathVariable Long id,
-            @RequestParam String status) {
+            @RequestParam String status,
+            @RequestParam(required = false) Long hubId,
+            @RequestParam(required = false) String location) {
 
-        Delivery delivery = deliveryService.updateStatus(id, status);
+        Delivery delivery = deliveryService.updateStatus(id, status, hubId, location);
         return ResponseEntity.ok(
                 new ApiResponse<>(true, "Status updated", delivery));
     }

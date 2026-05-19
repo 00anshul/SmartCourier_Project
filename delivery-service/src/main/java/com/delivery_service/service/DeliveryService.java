@@ -150,7 +150,7 @@ public class DeliveryService {
     }
 
     @Transactional
-    public Delivery updateStatus(Long deliveryId, String status) {
+    public Delivery updateStatus(Long deliveryId, String status, Long hubId, String location) {
         logger.info("Attempting to update status for Delivery ID: {} to {}", deliveryId, status);
 
         Delivery delivery = deliveryRepository.findById(deliveryId)
@@ -162,13 +162,45 @@ public class DeliveryService {
         delivery.setStatus(DeliveryStatus.valueOf(status));
         Delivery saved = deliveryRepository.save(delivery);
 
-        rabbitTemplate.convertAndSend(
-                RabbitMQConfig.DELIVERY_STATUS_EXCHANGE,
-                RabbitMQConfig.DELIVERY_STATUS_KEY,
-                saved.getId() + ":" + saved.getTrackingNumber() + ":" + status
-        );
+        try {
+            String message = saved.getId() + ":" + saved.getTrackingNumber() + ":" + status + ":" + 
+                             (hubId != null ? hubId : "") + ":" + (location != null ? location : "");
+            rabbitTemplate.convertAndSend(
+                    RabbitMQConfig.DELIVERY_STATUS_EXCHANGE,
+                    RabbitMQConfig.DELIVERY_STATUS_KEY,
+                    message
+            );
+            logger.info("Successfully updated status to {} and published to RabbitMQ for Tracking Number: {}", status, saved.getTrackingNumber());
+        } catch (Exception e) {
+            logger.warn("RabbitMQ unavailable — status event not published for Delivery {}: {}", deliveryId, e.getMessage());
+        }
 
-        logger.info("Successfully updated status to {} and published to RabbitMQ for Tracking Number: {}", status, saved.getTrackingNumber());
+        return saved;
+    }
+
+    @Transactional
+    public Delivery cancelDelivery(Long deliveryId, Long customerId) {
+        logger.info("Attempting to cancel Delivery ID: {} for Customer ID: {}", deliveryId, customerId);
+
+        Delivery delivery = deliveryRepository.findById(deliveryId)
+                .orElseThrow(() -> {
+                    logger.warn("Cancellation failed: Delivery not found with ID: {}", deliveryId);
+                    return new RuntimeException("Delivery not found");
+                });
+
+        if (!delivery.getCustomerId().equals(customerId)) {
+            logger.warn("Security warning: Customer {} attempted to cancel unauthorized Delivery {}", customerId, deliveryId);
+            throw new RuntimeException("You are not authorized to cancel this delivery");
+        }
+
+        if (delivery.getStatus() != DeliveryStatus.DRAFT && delivery.getStatus() != DeliveryStatus.BOOKED) {
+            logger.warn("Cancellation failed: Delivery {} cannot be cancelled in state {}", deliveryId, delivery.getStatus());
+            throw new RuntimeException("Delivery can only be cancelled before pickup");
+        }
+
+        delivery.setStatus(DeliveryStatus.CANCELLED);
+        Delivery saved = deliveryRepository.save(delivery);
+        logger.info("Successfully cancelled Delivery ID: {}", deliveryId);
         return saved;
     }
 

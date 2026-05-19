@@ -37,6 +37,11 @@ public class RedisTokenService {
         return token.equals(stored);
     }
 
+    /** Returns the stored token, or null if Redis has no entry for this user. */
+    public String getStoredToken(Long userId) {
+        return redisTemplate.opsForValue().get(buildKey(userId));
+    }
+
     public void deleteToken(Long userId) {
         redisTemplate.delete(buildKey(userId));
     }

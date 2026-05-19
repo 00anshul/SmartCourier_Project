@@ -50,7 +50,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         Long userId    = jwtUtil.extractUserId(token);
         
      // ── Redis check ──────────────────────────────────────
-        if (!redisTokenService.isTokenActive(userId, token)) {
+        // Only reject if Redis has a DIFFERENT token stored (explicit invalidation).
+        // If Redis has NO entry (null), it means Redis was restarted/cleared —
+        // fall back to trusting the JWT signature rather than blocking all users.
+        String storedToken = redisTokenService.getStoredToken(userId);
+        if (storedToken != null && !storedToken.equals(token)) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json");
             response.getWriter().write(

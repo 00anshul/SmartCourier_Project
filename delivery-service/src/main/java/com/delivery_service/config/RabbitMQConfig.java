@@ -14,9 +14,16 @@ public class RabbitMQConfig {
     public static final String DELIVERY_STATUS_EXCHANGE = "delivery.status.exchange";
     public static final String DELIVERY_STATUS_KEY      = "delivery.status.changed";
 
+    // Must match the tracking-service declaration exactly to avoid RabbitMQ PRECONDITION_FAILED
+    private static final String DELIVERY_STATUS_DLX     = "delivery.status.dlx";
+    private static final String DELIVERY_STATUS_DLQ_KEY = "delivery.status.dlq.key";
+
     @Bean
     Queue deliveryStatusQueue() {
-        return new Queue(DELIVERY_STATUS_QUEUE, true);
+        return QueueBuilder.durable(DELIVERY_STATUS_QUEUE)
+                .withArgument("x-dead-letter-exchange", DELIVERY_STATUS_DLX)
+                .withArgument("x-dead-letter-routing-key", DELIVERY_STATUS_DLQ_KEY)
+                .build();
     }
 
     @Bean
